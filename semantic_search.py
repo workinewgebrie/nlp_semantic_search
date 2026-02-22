@@ -22,6 +22,18 @@ from typing import List, Tuple
 import nltk
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
+import re
+
+# Fallback English stopwords (small conservative set) used when NLTK corpora
+# are not available or cannot be downloaded.
+FALLBACK_STOPWORDS = {
+    'a','an','the','and','or','if','in','on','at','for','with','without','to',
+    'of','by','is','are','was','were','be','been','being','this','that','these',
+    'those','it','its','as','from','they','them','he','she','his','her','you',
+    'i','we','us','our','but','not','can','will','would','could','should','do',
+    'does','did','have','has','had','which','what','when','where','who','whom',
+    'how','about','into','over','after','before','up','down','may'
+}
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -34,18 +46,29 @@ except Exception:
 
 
 def ensure_nltk_resources() -> None:
+    # Try to ensure data; if downloads fail (e.g. offline), we'll fall back
+    # to lightweight alternatives elsewhere in the code.
     try:
         nltk.data.find('tokenizers/punkt')
     except LookupError:
-        nltk.download('punkt')
+        try:
+            nltk.download('punkt')
+        except Exception:
+            pass
     try:
         nltk.data.find('corpora/stopwords')
     except LookupError:
-        nltk.download('stopwords')
+        try:
+            nltk.download('stopwords')
+        except Exception:
+            pass
     try:
         nltk.data.find('corpora/wordnet')
     except LookupError:
-        nltk.download('wordnet')
+        try:
+            nltk.download('wordnet')
+        except Exception:
+            pass
 
 
 def load_documents_from_folder(folder: str) -> List[Tuple[str, str]]:
@@ -69,20 +92,40 @@ def default_documents() -> List[Tuple[str, str]]:
     return samples
 
 
-def preprocess_text(text: str, lemmatizer: WordNetLemmatizer, stop_words_set: set) -> str:
+def preprocess_text(text: str, lemmatizer: WordNetLemmatizer | None, stop_words_set: set) -> str:
     text = text.lower()
-    tokens = nltk.word_tokenize(text)
+    # Tokenize: prefer NLTK if available, otherwise use a regex tokenizer
+    try:
+        tokens = nltk.word_tokenize(text)
+    except Exception:
+        tokens = re.findall(r"\b[a-zA-Z]+\b", text)
+
     tokens = [t for t in tokens if t.isalpha()]
     tokens = [t for t in tokens if t not in stop_words_set]
-    tokens = [lemmatizer.lemmatize(t) for t in tokens]
+    if lemmatizer is not None:
+        try:
+            tokens = [lemmatizer.lemmatize(t) for t in tokens]
+        except Exception:
+            pass
     return " ".join(tokens)
 
 
 class SemanticSearch:
     def __init__(self, documents: List[Tuple[str, str]]):
         ensure_nltk_resources()
-        self.lemmatizer = WordNetLemmatizer()
-        self.stop_words = set(stopwords.words('english'))
+        # Attempt to create lemmatizer; if WordNet is unavailable, fall back
+        try:
+            self.lemmatizer = WordNetLemmatizer()
+        except Exception:
+            self.lemmatizer = None
+
+        # Attempt to load NLTK stopwords; if unavailable, use fallback set
+        try:
+            self.stop_words = set(stopwords.words('english'))
+            if not self.stop_words:
+                raise LookupError
+        except Exception:
+            self.stop_words = FALLBACK_STOPWORDS
 
         self.docs_meta = []  # list of (id, raw_text, preprocessed_text)
         for ident, text in documents:

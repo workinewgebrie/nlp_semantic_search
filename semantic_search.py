@@ -81,6 +81,47 @@ def load_documents_from_folder(folder: str) -> List[Tuple[str, str]]:
     return docs
 
 
+def load_documents_from_csv(path: str, text_columns: List[str] = None) -> List[Tuple[str, str]]:
+    """Load documents from a CSV file. Tries common text column names if not provided."""
+    import pandas as pd
+
+    if text_columns is None:
+        text_columns = ['text', 'content', 'article', 'body']
+    df = pd.read_csv(path)
+    # find first matching text column
+    col = None
+    for c in text_columns:
+        if c in df.columns:
+            col = c
+            break
+    if col is None:
+        # fallback to first string-like column
+        for c in df.columns:
+            if pd.api.types.is_string_dtype(df[c]):
+                col = c
+                break
+    docs = []
+    if col is None:
+        return docs
+    for i, val in enumerate(df[col].astype(str).fillna('')):
+        docs.append((f"row_{i}", val))
+    return docs
+
+
+def load_documents_from_jsonl(path: str, text_key: str = 'text') -> List[Tuple[str, str]]:
+    import json
+    docs = []
+    with open(path, 'r', encoding='utf-8') as f:
+        for i, line in enumerate(f):
+            try:
+                obj = json.loads(line)
+                text = obj.get(text_key) or obj.get('content') or obj.get('body') or ''
+                docs.append((f"row_{i}", str(text)))
+            except Exception:
+                continue
+    return docs
+
+
 def default_documents() -> List[Tuple[str, str]]:
     samples = [
         ("doc1", "Natural Language Processing enables computers to understand human language."),
